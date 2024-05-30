@@ -1,0 +1,6 @@
+../Core/Src/INA236.c:23:10:INA236Read_cx	32	static
+../Core/Src/INA236.c:37:6:INA236_BitReset	40	static
+../Core/Src/INA236.c:47:6:INA236_Calibrate	48	static
+../Core/Src/INA236.c:106:10:INA236Read_BusV	32	static
+../Core/Src/INA236.c:122:10:INA236Read_Current	32	static
+../Core/Src/INA236.c:156:7:INA236Read_Power	32	static
