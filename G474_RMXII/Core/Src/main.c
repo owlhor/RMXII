@@ -37,15 +37,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define FW_Ver 0x01290524
+#define FW_Ver 0x01310524
 
 
 #define adc_am 10 //// amount of ADC data in one row of DMA
 #define adc_sz 100 //// size of ADC buffer
-
-#define ina236_AD_1 0b1000000 << 1
-#define ina236_AD_2 0b1000001 << 1
-#define ina236_AD_3 0b1000010 << 1
 
 #define HX_CK_GPIO_PORT GPIOA
 #define HX_CK_PIN GPIO_PIN_7
@@ -65,7 +61,6 @@ DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c3;
-I2C_HandleTypeDef hi2c4;
 
 UART_HandleTypeDef hlpuart1;
 
@@ -80,7 +75,7 @@ TIM_HandleTypeDef htim17;
 //// ADC -------------------
 uint16_t ADCRawread[100] = {0};
 
-//// General variable
+//// General variable ---------------
 char uartTXBf[100];
 
 struct _timestamp{
@@ -96,7 +91,7 @@ struct _flag{
 	uint8_t motorset;
 } flag;
 
-//// buzzer
+//// buzzer-----------------
 struct _bzzr{
 	uint8_t flag; // flag counter for buzzer, n times buzzer will scream
 	uint16_t priod_up;
@@ -132,6 +127,7 @@ struct _mot{
 	uint16_t counta;
 } set_mot;
 
+
 struct _pwm_rander{
 	uint16_t pulse;
 	uint16_t duty;
@@ -140,26 +136,11 @@ struct _pwm_rander{
 	uint16_t fq;
 }prand;
 
-//struct _HX711{
-//	uint8_t i;
-//	uint8_t state;
-//	int adc;
-//	uint32_t adc_lc;
-//	float g;
-//} hx;
-//static enum sthx{wait, clock};
-
+//// load cell
 hx711_t loadcell;
 float weight;
 
-//////// I2C --------------------
-
-
-union _i2cbuffer{
-	uint8_t  D8[20];
-	uint16_t D16[10];
-}i2cbf;
-
+//////// I2C -------------------
 INA236_Read_Set ina_s1;
 INA236_Read_Set ina_s2;
 INA236_Read_Set ina_s3;
@@ -182,7 +163,6 @@ static void MX_TIM3_Init(void);
 static void MX_TIM8_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM17_Init(void);
-static void MX_I2C4_Init(void);
 /* USER CODE BEGIN PFP */
 
 uint16_t adc_logging(uint8_t indx);
@@ -235,18 +215,17 @@ int main(void)
   MX_TIM8_Init();
   MX_TIM16_Init();
   MX_TIM17_Init();
-  MX_I2C4_Init();
   /* USER CODE BEGIN 2 */
 
-  //// ADC DMA Start
+  //// ADC DMA Start --------------
   HAL_ADC_Start_DMA(&hadc1, ADCRawread, adc_sz);
 
-  /// Timers Start
-  HAL_TIM_Base_Start(&htim1);
+  /// Timers Start ------------------------------
+  HAL_TIM_Base_Start(&htim1); /// Motor
   HAL_TIM_Base_Start_IT(&htim16); // buzzer timer
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_1 | TIM_CHANNEL_2);
 
-  //// buzzer param setting
+  //// buzzer param setting init
   buzzr.flag = 1;
   buzzr.priod_up = 250;
   buzzr.priod_dn = 100;
@@ -254,10 +233,12 @@ int main(void)
 
   timestamp.hx = 50;
 
+  //// load cell HX711
   hx711_init(&loadcell, HX711_CLK_GPIO_Port, HX711_CLK_Pin, HX711_DATA_GPIO_Port, HX711_DATA_Pin);
   hx711_coef_set(&loadcell, 354.5); // read after calibration
   hx711_tare(&loadcell, 10);
 
+  //// INA236 Init & calibrate for current calculation
   INA236_Calibrate(&hi2c1, INA236_A_AD_1);
   INA236_Calibrate(&hi2c1, INA236_A_AD_2);
   INA236_Calibrate(&hi2c1, INA236_A_AD_3);
@@ -276,6 +257,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+	  //// ADC reads
 	  if(HAL_GetTick() >= timestamp.adc){
 		  timestamp.adc = HAL_GetTick() + 20;
 
@@ -290,18 +272,27 @@ int main(void)
 		  rmxii.a_drv_b = adc_logging(8);
 		  rmxii.a_drv_c = adc_logging(9);
 
-		  rmxii.inc_enco = TIM3->CNT;
+		  rmxii.inc_enco = TIM3->CNT; // encoder read
 	  }
 
+	  //// Motor run sample
 	  if(HAL_GetTick() >= timestamp.slope){
 		  timestamp.slope = HAL_GetTick() + 2;
 		  slope_runner_1(1000);
 		  motor_run_1();
+
+		  /* Motor driver OUTPUT command samples
+		   *
+		   * HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+		   * HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
+		   * TIM1->CCR3 = 50;
+		   * TIM1->CCR4 = 0;
+		   * */
 	  }
 
+	  //// INA236 Read
 	  if(HAL_GetTick() >= timestamp.i2c){
 	  	timestamp.i2c = HAL_GetTick() + 1;
-
 
 	  	ina_s1.Bus_V = INA236Read_BusV(&hi2c1, INA236_A_AD_1);
 	  	ina_s2.Bus_V = INA236Read_BusV(&hi2c1, INA236_A_AD_2);
@@ -316,8 +307,7 @@ int main(void)
 
 	  }
 
-
-
+	  //// Load cell read
 	  if(HAL_GetTick() >= timestamp.hx){
 	  	 //// time stamp must be 100, 10Hz
 		  timestamp.hx = HAL_GetTick() + 100;
@@ -619,54 +609,6 @@ static void MX_I2C3_Init(void)
 }
 
 /**
-  * @brief I2C4 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C4_Init(void)
-{
-
-  /* USER CODE BEGIN I2C4_Init 0 */
-
-  /* USER CODE END I2C4_Init 0 */
-
-  /* USER CODE BEGIN I2C4_Init 1 */
-
-  /* USER CODE END I2C4_Init 1 */
-  hi2c4.Instance = I2C4;
-  hi2c4.Init.Timing = 0x10802D9B;
-  hi2c4.Init.OwnAddress1 = 0;
-  hi2c4.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c4.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c4.Init.OwnAddress2 = 0;
-  hi2c4.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
-  hi2c4.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c4.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Analogue filter
-  */
-  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c4, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Digital filter
-  */
-  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c4, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C4_Init 2 */
-
-  /* USER CODE END I2C4_Init 2 */
-
-}
-
-/**
   * @brief LPUART1 Initialization Function
   * @param None
   * @retval None
@@ -958,7 +900,7 @@ static void MX_TIM16_Init(void)
 
   /* USER CODE END TIM16_Init 1 */
   htim16.Instance = TIM16;
-  htim16.Init.Prescaler = 999;
+  htim16.Init.Prescaler = 1699;
   htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim16.Init.Period = 4999;
   htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -1076,6 +1018,11 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+/**
+  * @brief adc_logging,
+  * get the ADC raw read from ADC buffer DMA
+  * -> insert the average into the variable
+  */
 uint16_t adc_logging(uint8_t indx){
 	uint8_t count = 0;
 	uint16_t buf = 0;
@@ -1083,9 +1030,16 @@ uint16_t adc_logging(uint8_t indx){
 		buf += ADCRawread[indx];
 		count++;
 	}
-	return buf / count;
+	return buf / count; //// average return
 }
 
+/**
+  * @brief slope_runner_1
+  * run the loop of number in ramp series
+  * from [1, 2,..., max, max-1, max-2,..., 2, 1]
+  *
+  * use case: Ramp PWM for motor drive, sample case
+  */
 void slope_runner_1(uint16_t max){
 	//// slope runner
 	switch(slopstate){
@@ -1109,6 +1063,11 @@ void slope_runner_1(uint16_t max){
 	}//// slope runner
 }
 
+/**
+  * @brief motor_run_1
+  * motor driver run samples
+  * get PWM from slope_runner_1
+  */
 void motor_run_1(){
 
 	   	//// motor state =====================================
@@ -1155,16 +1114,21 @@ void motor_run_1(){
 
 		   TIM1->CCR1 = 0;
 		   TIM1->CCR2 = set_mot.slope;
-
 		   break;
-
 	   	   }// switch
 }
 
 /**
   * @brief Buzzer Machine
 	flag // flag counter for buzzer, n times buzzer will scream
-	priod_up  priod_dn -> time in ms to scream and sleep buzzer in 1 period
+	priod_up  priod_dn // -> time in ms to scream and sleep buzzer in 1 period
+	ex. want buzzer to scream for 2 times, 250ms per time
+
+	buzzr.flag = 2;
+	buzzr.priod_up = 250;
+	buzzr.priod_dn = 100;
+	buzzer_scream_cnt(htim);
+
   */
 void buzzer_scream_cnt(TIM_HandleTypeDef *htim){
 	static enum {bz_init, bz_silent, bz_scream} bz_st = bz_init;
@@ -1172,7 +1136,7 @@ void buzzer_scream_cnt(TIM_HandleTypeDef *htim){
 		switch(bz_st){
 		default:
 		case bz_init:
-			//HAL_GPIO_WritePin(Buzzer_GPIO_Port, Buzzer_Pin, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(buz_1_GPIO_Port, buz_1_Pin, GPIO_PIN_RESET);
 
 			if(buzzr.flag){
 
@@ -1219,31 +1183,14 @@ void buzzer_scream_cnt(TIM_HandleTypeDef *htim){
 		}
 
 }
-//
-//void HX711_Machine(){
-//
-//
-//	switch(sthx){
-//
-//	default:
-//	case wait:
-//		HAL_GPIO_WritePin(HX_CK_GPIO_PORT, HX_CK_PIN, GPIO_PIN_SET);
-//		break;
-//
-//	case clock:
-//		break;
-//	}
-//}
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	if(GPIO_Pin == GPIO_PIN_13){
 
-//		buzzr.flag = 2;
-//		buzzr.priod_up = 250;
-//		buzzr.priod_dn = 100;
-//		buzzer_scream_cnt(&htim16);
-
-		HAL_GPIO_TogglePin(buz_1_GPIO_Port, buz_1_Pin);
+		buzzr.flag = 2;
+		buzzr.priod_up = 250;
+		buzzr.priod_dn = 100;
+		buzzer_scream_cnt(&htim16);
 
 		flag.motorset = 1;
 		}
@@ -1255,36 +1202,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		buzzer_scream_cnt(&htim16);
 	}
 
-//  if (htim == &htim17)
-//  {
-//	hx.i++;
-//	if (hx.i <= 50){
-//		HAL_GPIO_WritePin(HX_CK_GPIO_PORT, HX_CK_PIN, hx.state);
-//
-//		if(HAL_GPIO_ReadPin(HX_CK_GPIO_PORT, HX_CK_PIN) == GPIO_PIN_SET){
-//			hx.adc_lc = hx.adc_lc << 1;
-//			hx.adc_lc = hx.adc_lc | HAL_GPIO_ReadPin(HX_DT_GPIO_PORT, HX_DT_PIN);
-//
-//		}
-//		hx.state = ~hx.state;
-//
-//	}
-//	if (hx.i > 50 && hx.i < 60){
-//		HAL_GPIO_WritePin(HX_CK_GPIO_PORT, HX_CK_PIN, hx.state);
-//		HAL_TIM_Base_Stop_IT(&htim1);
-//		hx.i = 100;
-//		hx.adc =  hx.adc_lc;
-//		hx.adc_lc = 0;
-//
-//		if (hx.adc<=316500){
-//			hx.adc = 0;
-//		}else{
-//			hx.adc = hx.adc-316500;
-//		}
-//		hx.g = (hx.adc)*0.0027228571428571;
-//
-//	}
-//  }
 }
 /* USER CODE END 4 */
 

@@ -7,6 +7,9 @@
 #define hx711_delay(x)    HAL_Delay(x)
 #endif
 
+/* The driver is from https://github.com/nimaltd/HX711
+ * */
+
 //#############################################################################################
 void hx711_delay_us(void)
 {
