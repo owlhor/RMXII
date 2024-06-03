@@ -27,6 +27,7 @@ void setup() {
   delay(250);
 
   //// 30uS falling toggle
+  /* https://e2e.ti.com [FAQ] DRV8243/44/45-Q1. 20-40us nSleep pulse input requirement for H-Variant*/
   digitalWrite(DRV_start, LOW);
   delayMicroseconds(30);
   digitalWrite(DRV_start, HIGH);
